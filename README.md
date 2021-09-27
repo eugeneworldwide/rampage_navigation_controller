@@ -1,18 +1,23 @@
-# rampage_navigation_controller
-This is the repo for the Rampage bluetooth handlebar navigation controller
-
 WELCOME TO THE RALLY RAMPAGE NAVIGATION CONTROLLER
 
 This project is for developing a bluetooth handlebar controller to use for navigation whilst riding motorbike.
 
-The project was started by Eugene Beetge from Rally Rampage. 
+The project was started by Eugene Beetge from Rally Rampage. The original designs and coding are all from Eugene.
 
-The original designs and coding are all from Eugene.
-
-For more informaiton please visit: 
+For more information please visit: 
 
 https://www.rallyrampage.com
 
 or 
 
 email at info@rallyrampage.com
+
+REVISIONS & REALEASES
+
+Version 1.5  (Release date 2021/09/27)
+- included 3d print files
+- 2 versions of 3d print files with different designs to make manufacturing easier
+- permanent power option in the design
+
+Version 1.2 (Release date 2021/06/27)
+- original open source files
