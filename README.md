@@ -19,5 +19,5 @@ Version 1.5  (Release date 2021/09/27)
 - 2 versions of 3d print files with different designs to make manufacturing easier
 - permanent power option in the design
 
-Version 1.2 (Release date 2021/06/27)
+Version 1.3 (Release date 2021/06/27)
 - original open source files
