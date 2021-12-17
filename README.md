@@ -14,6 +14,13 @@ email at info@rallyrampage.com
 
 REVISIONS & RELEASES
 
+Version 1.7.2  (Release date 2021/12/17)
+- updated code for all 4 new apps
+	Locus Maps
+	Rally Navigator
+	OsMand Maps
+	Piste Roadbook
+
 Version 1.7  (Release date 2021/12/14)
 - complete new functionality using rocker switches.
 - rocker one mode is to select one of 5 apps, with LED flicker to confirm app selected.
