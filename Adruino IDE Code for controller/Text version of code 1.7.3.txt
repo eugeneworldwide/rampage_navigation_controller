@@ -1,13 +1,14 @@
 //VERSION 1.7.3
 // This version allow for the selection of various apps by putting the unit in MODE as well as reading the battery status
 // and then selecting the appropriate app based on the button pressed. Here are the apps and buttons
+// WHEN YOU PLACE THE UNIT IN MODE SELECT AND THE LED IS RED, BY PRESSING THE FOLLOWING BUTTONS YOU CAN SELECT THE APP THE KEYS ARE ASSIGNED TO FOR WHEN YOU GO BACK TO RIDING MODE
 // Button 1. Locus Maps
 // Button 2. Rally Navigator
 // Button 3. OsmAnd
 // Button 4. Piste Roadbook Reader
-// Button 5. UNASSIGNED
-// Toggle 6. Locus Maps (as backup incase your buttons to select arent working or you are using something else)
-// Toggle 7. Rally Navigator  (as backup incase your buttons to select arent working or you are using something else)
+// Button 5. Battery level check and sending back to Androidn device as text. Can be seen on any text interface
+// Toggle 6 (Toggle switch). Locus Maps (as backup incase your buttons to select arent working or you are using something else)
+// Toggle 7 (Toggle switch). Rally Navigator  (as backup incase your buttons to select arent working or you are using something else)
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -21,11 +22,14 @@
 
 Adafruit_BluefruitLE_SPI ble(8, 7, 4);
 
+//Factory reset to 0 for no reset, or 1 to factory reset when scketch starts
+#define FACTORYRESET_ENABLE 0
+
 /////////////////////////////////////////////////////////
 //Choose some setting that may be different on your unit
 /////////////////////////////////////////////////////////
 
-//APP LED SEQUENCE OF COLOUR
+//APP LED SEQUENCE OF COLOUR. SWOP THE VALUE OF YOUR COLCOURS ARE WRONG WAY AROUND
 const int ledGREEN = A1;
 const int ledRED = A0;
 
@@ -69,6 +73,40 @@ void setup()
   Serial.begin(115200);
   Serial.println("Starting up ...");
 
+  /////////////////////////////////////////
+  ////////SETUP BLUETOOTH
+  /////////////////////////////////////////
+
+  //Factory reset if enabled above
+  if ( FACTORYRESET_ENABLE )
+  {
+    /* Perform a factory reset to make sure everything is in a known state */
+    Serial.println(F("Performing a factory reset: "));
+    if ( ! ble.factoryReset() ){
+      //error(F("Couldn't factory reset"));
+    }
+  }
+
+  //Setup BT
+  ble.begin(false);
+  ble.sendCommandCheckOK("AT+GAPDEVNAME=Rampage_Controller_1.7.3");
+  ble.sendCommandCheckOK("AT+BLEHIDEN=On");
+  ble.sendCommandCheckOK("AT+BleKeyboardEn=On");
+  Serial.println("Bluetooth Started OK!");
+  digitalWrite(LED_BUILTIN, LOW);
+
+  //Double reset to see if it improves auto connect on Androidn devices
+  ble.reset();
+  delay(2000);
+  ble.reset();
+
+  /* Disable command echo from Bluefruit */
+  ble.echo(false);
+
+  /* Print Bluefruit information */
+  Serial.println("Requesting Bluefruit info:");
+  ble.info();
+
   //Push buttons
   pinMode(button1, INPUT_PULLUP);
   pinMode(button2, INPUT_PULLUP);
@@ -84,21 +122,6 @@ void setup()
   //App rocker switch
   pinMode(modeSelect, INPUT_PULLUP);
 
-  ble.begin(false);
-  ble.sendCommandCheckOK("AT+GAPDEVNAME=Rampage_Controller_1.7.3");
-  ble.sendCommandCheckOK("AT+BLEHIDEN=On");
-  ble.sendCommandCheckOK("AT+BleKeyboardEn=On");
-  ble.reset();
-  Serial.println("Bluetooth Started OK!");
-  digitalWrite(LED_BUILTIN, LOW);
-
-  /* Disable command echo from Bluefruit */
-  ble.echo(false);
-
-  Serial.println("Requesting Bluefruit info:");
-  /* Print Bluefruit information */
-  ble.info();
-
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -111,6 +134,8 @@ void loop()
   //////////////////////////////////////////////////////////////
   // START SOFT APP SELECT LOOP
   //////////////////////////////////////////////////////////////
+  
+  //Start of select softapp 1
   if (digitalRead(modeSelect) == LOW) {
     digitalWrite(ledRED, HIGH);
     digitalWrite(ledGREEN, LOW);
@@ -128,8 +153,10 @@ void loop()
       }
       delay (300);
       digitalWrite(ledRED, HIGH);
-    } //End of state 1
+    } 
+    //End of select softapp 1
 
+    //Start of select softapp 2
     if (digitalRead(button2) == button2state) {
       softApp = 2;
       Serial.println ("While in Mode Select you have selected softApp 2: Rally navigator.");
@@ -144,8 +171,10 @@ void loop()
       }
       delay (300);
       digitalWrite(ledRED, HIGH);
-    } //End of state 2
+    } 
+    //End of select softapp 2
 
+    //Start of select softapp 3
     if (digitalRead(button3) == button3state) {
       softApp = 3;
       Serial.println ("While in Mode Select you have selected softApp 3: OsMand.");
@@ -160,8 +189,10 @@ void loop()
       }
       delay (300);
       digitalWrite(ledRED, HIGH);
-    } //End of state 3
+    } 
+    //End of select softapp 3
 
+    //Start of select softapp 4
     if (digitalRead(button4) == button4state) {
       softApp = 4;
       Serial.println ("While in Mode Select you have selected softApp 4: Piste Roadbook Reader.");
@@ -176,17 +207,17 @@ void loop()
       }
       delay (300);
       digitalWrite(ledRED, HIGH);
-    } //End of state 4
+    } 
+    //End of select softapp 4
 
+    //Start of select softapp 5
     if (digitalRead(button5) == button5state) {
       //softApp = 0;
       Serial.println ("While in Mode Select you have selected Button 5: VBat Voltage Check.");
       //ble.println("AT+BleKeyboard=Button 5: VBat Voltage Check. ");
 
-      ////////////////////////
       ////Read battery for UART sending unique to this button in mode
-      ////////////////////////
-#define VBATPIN A9 // Measuring battery first on pin A9
+      #define VBATPIN A9 // Measuring battery first on pin A9
       pinMode(button4, LOW); //Button 4 assigned to A9 for voltage just set to LOW to give correct values
       float measuredvbat = analogRead(VBATPIN);
       measuredvbat *= 2;    // we divided by 2, so multiply back
@@ -224,8 +255,10 @@ void loop()
       }
       delay (300);
       digitalWrite(ledRED, HIGH);
-    } //End of state 5
+    } 
+    //End of select softapp 5
 
+    //Start of select softapp 6
     if (digitalRead(button6) == button6state) {
       softApp = 1;
       Serial.println ("While in Mode Select you have selected softApp 1: Locus Maps button mapping.");
@@ -240,7 +273,10 @@ void loop()
       }
       delay (300);
       digitalWrite(ledRED, HIGH);
-    } //End of state 6
+    } 
+    //End of select softapp 6
+
+    //Start of select softapp 7
     if (digitalRead(button7) == button7state) {
       softApp = 2;
       Serial.println ("While in Mode Select you have selected softApp 2: Rally navigator.");
@@ -255,7 +291,9 @@ void loop()
       }
       delay (300);
       digitalWrite(ledRED, HIGH);
-    } //End of state 7
+    } 
+    //End of select softapp 7
+    
   }
 
   //////////////////////////////////////////////////////////////
