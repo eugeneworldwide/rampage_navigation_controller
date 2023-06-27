@@ -1,0 +1,605 @@
+//RALLY RAMPAGE BLUETOOTH BIKE HANDLEBAR NAVIGATION CONTROLLER
+// www.rallyrampage.com
+// Version: 1.7.3.7
+// Updated: 2023-06-26
+
+// This version allows for the selection of various apps by putting the unit in MODE
+// It also reads the battery status, and then selects the appropriate app based on the button pressed.
+// IN MODE SELECT:
+// after each button press it also sends a text message back to the phone to see on any text field on the phone.
+// The following apps and keybord command sent via bluetooth are mapped to these apps:
+//   Button 1: Locus Maps
+//   Button 2: Rally Navigator
+//   Button 3: OsMand
+//   Button 4: Piste Roadbook Reader
+//   Button 5: VBat Voltage Check (This isn't a softApp, it's a function to check the battery voltage and send to phone as text)
+//   Button 6: Locus Maps Button Mapping (RESERVE)
+//   Button 7: Rally Navigator (RESERVE)
+
+#include <Arduino.h>
+#include <SPI.h>
+#include "Adafruit_BLE.h"
+#include "Adafruit_BluefruitLE_SPI.h"
+#include "Adafruit_BluefruitLE_UART.h"
+
+#if SOFTWARE_SERIAL_AVAILABLE
+#include <SoftwareSerial.h>
+#endif
+
+// Create an instance of the Adafruit BluefruitLE_SPI class, specifying the pins used for CS, IRQ, and RST.
+Adafruit_BluefruitLE_SPI ble(8, 7, 4);
+
+// Set to 0 for no factory reset on startup, or 1 to perform a factory reset on startup.
+#define FACTORYRESET_ENABLE 0
+
+/////////////////////////////////////////////////////////
+// Customize these settings based on your hardware setup
+/////////////////////////////////////////////////////////
+
+// Define the pins for the LEDs. If your LED colors are reversed, swap these values.
+const int ledGREEN = A1;  // The pin connected to the green LED
+const int ledRED = A0;  // The pin connected to the red LED
+
+// Define the default states for the pushbuttons. Change these based on your button type:
+// Normally open buttons: LOW
+// Normally closed buttons: HIGH
+const int button1state = LOW;
+const int button2state = LOW;
+const int button3state = LOW;
+const int button4state = LOW;
+const int button5state = LOW;
+const int button6state = LOW;
+const int button7state = LOW;
+
+/////////////////////////////////////////////////////////
+
+// Define the pins for the pushbuttons.
+const int button1 = 12;  // Button 1 pin
+const int button2 = 11;  // Button 2 pin
+const int button3 = 10;  // Button 3 pin
+const int button4 = 9;  // Button 4 pin
+const int button5 = 5;  // Button 5 pin
+
+// Define the pins for the toggle switch buttons.
+const int button6 = A2;  // Button 6 pin
+const int button7 = A3;  // Button 7 pin
+
+// Define the pin for the mode switch button.
+const int modeSelect = 6;
+
+// Default value for the selected app. Change this if you want a different default app.
+// 0: No softapp yet
+// 1: Locus Maps
+// 2: Rally Navigator
+// 3: OsMand
+// 4: Piste Roadbook Reader
+int softApp = 1; //Locus set as default when starting unit
+
+// Define the delay time in ms between button presses and between toggle switches.
+const int buttonWait = 250;  // Button delay time
+const int toggleWait = 20;  // Toggle switch delay time
+const int ledFlashDelay = 150;
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// This function is called once when your program starts. It's used to initialize variables, 
+// input and output pin modes, and other libraries needed by your sketch.
+////////////////////////////////////////////////////////////////////////////////////////////////
+void setup()
+{
+  // Begin serial communication at a baud rate of 115200.
+  // You can change this to a lower or higher rate depending on your need, but ensure it matches the rate set on your receiving device (e.g. your PC).
+  Serial.begin(115200);
+  
+  // Output text "Starting up ..." to the serial monitor, used for debugging.
+  Serial.println("Starting up ...");
+
+  /////////////////////////////////////////
+  ////////SETUP BLUETOOTH
+  /////////////////////////////////////////
+  
+  // This part of the code initializes the Bluetooth module.
+  // If FACTORYRESET_ENABLE was set to 1, a factory reset is performed to ensure everything is in a known state
+  if ( FACTORYRESET_ENABLE )
+  {
+    // Output text "Performing a factory reset: " to the serial monitor.
+    Serial.println(F("Performing a factory reset: "));
+    
+    // If a factory reset fails, the error function will be called (it's currently commented out).
+    if ( ! ble.factoryReset() ){
+      //error(F("Couldn't factory reset"));
+    }
+  }
+
+  // Start the Bluetooth LE module
+  // The false parameter tells the module to not reset upon starting.
+  ble.begin(false);
+  
+  // Configure Bluetooth module with the appropriate settings.
+  // If these settings don't work for your specific module, you might need to consult its datasheet or documentation for the correct commands.
+  ble.sendCommandCheckOK("AT+GAPDEVNAME=Rampage_Controller_1.7.3");
+  ble.sendCommandCheckOK("AT+BLEHIDEN=On");
+  ble.sendCommandCheckOK("AT+BleKeyboardEn=On");
+  
+  // Output text "Bluetooth Started OK!" to the serial monitor.
+  Serial.println("Bluetooth Started OK!");
+  
+  // Turn the built-in LED off.
+  digitalWrite(LED_BUILTIN, LOW);
+
+  // A double reset is performed on the Bluetooth module to improve auto-connect on Android devices.
+  // You might need to adjust the delay or remove this part if it's not applicable to your project.
+  ble.reset();
+  delay(2000);
+  ble.reset();
+
+  /* Disable command echo from Bluefruit */
+  ble.echo(false);
+
+  /* Print Bluefruit information */
+  // This is useful for debugging and ensuring your module is working correctly.
+  Serial.println("Requesting Bluefruit info:");
+  ble.info();
+
+  // Set up button pins as input with built-in pullup resistors.
+  // This means the default state of the button pins will be HIGH until they are pulled LOW by pressing the buttons.
+  pinMode(button1, INPUT_PULLUP);
+  pinMode(button2, INPUT_PULLUP);
+  pinMode(button3, INPUT_PULLUP);
+  pinMode(button4, INPUT_PULLUP);
+  pinMode(button5, INPUT_PULLUP);
+  
+  // Set up toggle switch buttons as input with built-in pullup resistors.
+  pinMode(button6, INPUT_PULLUP);
+  pinMode(button7, INPUT_PULLUP);
+  
+  // Set up LED pins as output.
+  // When these pins are HIGH, the corresponding LEDs will be turned on.
+  pinMode(ledGREEN, OUTPUT);
+  pinMode(ledRED, OUTPUT);
+  
+  // Set up mode select switch pin as input with built-in pullup resistor.
+  pinMode(modeSelect, INPUT_PULLUP);
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+// THIS IS THE LOOP SECTION OF THE CODE THAT KEEPS LOOPING AND RUNNING
+////////////////////////////////////////////////////////////////////////////////////////////////
+void loop()
+{
+  //////////////////////////////////////////////////////////////
+  // START SOFT APP SELECT LOOP
+  //////////////////////////////////////////////////////////////
+
+  // The digitalRead(modeSelect) function checks if the mode select button has been pressed (LOW means button press)
+  if (digitalRead(modeSelect) == LOW) {
+    
+    // Turn on the red LED (HIGH) and turn off the green LED (LOW)
+    digitalWrite(ledRED, HIGH);
+    digitalWrite(ledGREEN, LOW);
+
+    // Check if button 1 has been pressed
+    if (digitalRead(button1) == button1state) {
+      // If button 1 has been pressed, set the softApp variable to 1
+      softApp = 1;
+      // Output a message to the serial console
+      Serial.println ("While in Mode Select you have selected softApp 1: Locus Maps.");
+      // Send a message via Bluetooth to the connected device
+      ble.println("AT+BleKeyboard=SoftApp 1: Locus Maps. ");
+      //Call function to flash LED according to softApp # selected
+      flashLedIndicator(1);
+    } 
+    // End of select softapp 1
+
+    // Check if button 2 has been pressed
+    // The sequence of operations is the same as for button 1, but softApp is set to 2
+    if (digitalRead(button2) == button2state) {
+      softApp = 2;
+      Serial.println ("While in Mode Select you have selected softApp 2: Rally navigator.");
+      // Send a message via Bluetooth to the connected device
+      ble.println("AT+BleKeyboard=SoftApp 2: Rally navigator. ");
+      //Call function to flash LED according to softApp # selected
+      flashLedIndicator(2);
+    } 
+    // End of select softapp 2
+
+    // Check if button 3 has been pressed
+    // The sequence of operations is the same as for button 1 and 2, but softApp is set to 3
+    if (digitalRead(button3) == button3state) {
+      softApp = 3;
+      Serial.println ("While in Mode Select you have selected softApp 3: OsMand.");
+      // Send a message via Bluetooth to the connected device
+      ble.println("AT+BleKeyboard=SoftApp 3: OsMand. ");
+      //Call function to flash LED according to softApp # selected
+      flashLedIndicator(3);
+    } 
+    // End of select softapp 3
+
+    // Check if button 4 has been pressed
+    // The sequence of operations is the same as for button 1, 2, and 3, but softApp is set to 4
+    if (digitalRead(button4) == button4state) {
+      softApp = 4;
+      Serial.println ("While in Mode Select you have selected softApp 4: Piste Roadbook Reader.");
+      // Send a message via Bluetooth to the connected device
+      ble.println("AT+BleKeyboard=SoftApp 4: Piste Roadbook Reader. ");    
+      //Call function to flash LED according to softApp # selected
+      flashLedIndicator(4);
+    } 
+    //End of select softapp 4
+
+    // Check if button 5 has been pressed
+    if (digitalRead(button5) == button5state) {
+      // Button 5 performs a special function of checking battery voltage
+      // It does not set a softApp value, unlike the previous buttons
+      Serial.println ("While in Mode Select you have selected Button 5: VBat Voltage Check.");
+
+      //Read battery for UART sending unique to this button in mode
+      // Define the pin used for battery voltage reading
+      #define VBATPIN A9 
+      pinMode(button4, LOW); // Set button4, which is connected to the same pin, to LOW for accurate voltage reading
+      float measuredvbat = analogRead(VBATPIN); // Read the voltage
+      // Convert the analog reading to actual voltage value
+      measuredvbat *= 2;    
+      measuredvbat *= 3.3;  
+      measuredvbat /= 1024; 
+
+      // Check if the battery voltage is below 4V (indicating it is connected and charging)
+      if (measuredvbat <= 4) {
+        Serial.print("Battery seems to be connected and voltage is: " );
+        Serial.println(measuredvbat);
+        ble.print("AT+BleKeyboard= ");
+        ble.print("PIN or battery voltage: ");
+        ble.print(measuredvbat);
+        ble.println("v. ");
+      }
+      // If voltage is higher, the battery might not be connected
+      else {
+        Serial.print("Battery does NOT seem to be connected, PIN voltage is: " );
+        Serial.println(measuredvbat);
+        ble.print("AT+BleKeyboard= ");
+        ble.print("PIN or battery voltage: ");
+        ble.print(measuredvbat);
+        ble.println("v. ");
+      }
+      pinMode(button5, INPUT_PULLUP); // Set button 5 back to INPUT_PULLUP for normal operation
+
+      //Call function to flash LED according to softApp # selected
+      flashLedIndicator(5);
+
+    } 
+    //End of select softapp 5
+
+    // Check if button 6 has been pressed
+    // The sequence of operations is the same as for button 1, but it doesn't select a different app
+    if (digitalRead(button6) == button6state) {
+      softApp = 1; //Locus Maps due to lack of other apps
+      Serial.println ("While in Mode Select you have selected softApp 1: Locus Maps button mapping.");
+      // Send a message via Bluetooth to the connected device
+      ble.println("AT+BleKeyboard=SoftApp 1: Locus Maps. ");
+      //Call function to flash LED according to softApp # selected
+      flashLedIndicator(1);
+    }
+    // End of select softapp 6
+
+    // Check if button 7 has been pressed
+    // The sequence of operations is the same as for button 2, but it doesn't select a different app
+    if (digitalRead(button7) == button7state) {
+      softApp = 2;
+      Serial.println ("While in Mode Select you have selected softApp 2: Rally navigator.");
+      // Send a message via Bluetooth to the connected device
+      ble.println("AT+BleKeyboard=SoftApp 2: Rally Navigator. ");
+      //Call function to flash LED according to softApp # selected
+      flashLedIndicator(2);
+    } 
+    // End of select softapp 7
+
+  }
+  ///////////////////////////////////////////////////////////////////////////////////////
+  // END SOFT APP SELECT LOOP
+  ///////////////////////////////////////////////////////////////////////////////////////
+
+
+  ///////////////////////////////////////////////////////////////////////////////////////
+  // START SOFT APP RUN LOOP
+  ///////////////////////////////////////////////////////////////////////////////////////
+  if (digitalRead(modeSelect) == HIGH) {
+    digitalWrite(ledRED, LOW);
+    digitalWrite(ledGREEN, HIGH);
+
+    if (softApp == 0) { //App 0 No softApp value yet
+      Serial.println("You are in softApp: ZERO");
+      digitalWrite(ledGREEN, HIGH);
+      delay(150);
+      digitalWrite(ledGREEN, LOW);
+      delay(150);
+    } //End softapp 0
+
+    if (softApp == 1) { // App 1 Locus Maps
+      digitalWrite(ledGREEN, HIGH); // Turn the GREEN LED on
+      digitalWrite(ledRED, LOW); // Turn the RED LED off
+      Serial.println("You are in softApp: Locus");
+      
+      //PUSH BUTTONS
+       if (digitalRead(button1) == button1state) {
+        Serial.println("Button 1");
+        // Sending the command for increasing volume
+        ble.sendCommandCheckOK("AT+BleHidControlKey=VOLUME+");
+        digitalWrite(ledGREEN, LOW);
+        delay(buttonWait);
+        digitalWrite(ledGREEN, HIGH);
+      }
+      if (digitalRead(button2) == button2state) {
+        Serial.println("Button 2");
+        // Sending the command for decreasing volume
+        ble.sendCommandCheckOK("AT+BleHidControlKey=VOLUME-");
+        digitalWrite(ledGREEN, LOW);
+        delay(buttonWait);
+        digitalWrite(ledGREEN, HIGH);
+      }
+      if (digitalRead(button3) == button3state) {
+        Serial.println("Button 3");
+        // Sending the 'r' key command (AT+BLEKEYBOARDCODE=00-00-15-00-00-00-00) 
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-15-00-00-00-00");
+        // Releasing the key (AT+BLEKEYBOARDCODE=00-00)
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00");
+        digitalWrite(ledGREEN, LOW);
+        delay(buttonWait);
+        digitalWrite(ledGREEN, HIGH);
+      }
+      if (digitalRead(button4) == button4state) {
+        Serial.println("Button 4");
+        // Sending the 'z' key command (AT+BLEKEYBOARDCODE=00-00-06-00-00-00-00)
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-06-00-00-00-00");
+        // Releasing the key (AT+BLEKEYBOARDCODE=00-00)
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00");
+        digitalWrite(ledGREEN, LOW);
+        delay(buttonWait);
+        digitalWrite(ledGREEN, HIGH);
+      }
+      if (digitalRead(button5) == button5state) {
+        Serial.println("Button 5");
+        // Sending the 'c' key command (AT+BLEKEYBOARDCODE=00-00-07-00-00-00-00)
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-07-00-00-00-00");
+        // Releasing the key (AT+BLEKEYBOARDCODE=00-00)
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00");
+        digitalWrite(ledGREEN, LOW);
+        delay(buttonWait);
+        digitalWrite(ledGREEN, HIGH);
+      }
+      //TOGGLE SWITCH
+      if (digitalRead(button6) == button6state) {
+        Serial.println("Button 6");
+        // Sending the command for increasing volume
+        ble.sendCommandCheckOK("AT+BleHidControlKey=VOLUME+");
+        digitalWrite(ledGREEN, LOW);
+        delay(buttonWait);
+        digitalWrite(ledGREEN, HIGH);
+      }
+      if (digitalRead(button7) == button7state) {
+        Serial.println("Button 7");
+        // Sending the command for decreasing volume
+        ble.sendCommandCheckOK("AT+BleHidControlKey=VOLUME-");
+        digitalWrite(ledGREEN, LOW);
+        delay(buttonWait);
+        digitalWrite(ledGREEN, HIGH);
+      }
+    } //End softapp 1
+
+    if (softApp == 2) { // App 2 Rally Navigator
+      digitalWrite(ledGREEN, HIGH); // Turn the GREEN LED on
+      digitalWrite(ledRED, LOW); // Turn the RED LED off
+      Serial.println("You are in softApp: Rally Navigator"); // Print a message to the Serial Monitor indicating the current app
+      
+      //PUSH BUTTONS
+      if (digitalRead(button1) == button1state) { // Check if button1 is pressed
+        Serial.println("Button 1"); // Print a message to the Serial Monitor indicating which button is pressed
+        ble.sendCommandCheckOK("AT+BleHidControlKey=VOLUME+"); // Send a command to increase the volume
+        digitalWrite(ledGREEN, LOW); // Turn the GREEN LED off
+        delay(buttonWait); // Wait for the buttonWait time period
+        digitalWrite(ledGREEN, HIGH); // Turn the GREEN LED on
+      }
+      if (digitalRead(button2) == button2state) { // Check if button2 is pressed
+        Serial.println("Button 2"); // Print a message to the Serial Monitor indicating which button is pressed
+        ble.sendCommandCheckOK("AT+BleHidControlKey=VOLUME-"); // Send a command to decrease the volume
+        digitalWrite(ledGREEN, LOW); // Turn the GREEN LED off
+        delay(buttonWait); // Wait for the buttonWait time period
+        digitalWrite(ledGREEN, HIGH); // Turn the GREEN LED on
+      }
+      if (digitalRead(button3) == button3state) { // Check if button3 is pressed
+        Serial.println("Button 3"); // Print a message to the Serial Monitor indicating which button is pressed
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-15-00-00-00-00"); // Send a command to simulate a key press ('r')
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00"); // Send a command to simulate a key release
+        digitalWrite(ledGREEN, LOW); // Turn the GREEN LED off
+        delay(buttonWait); // Wait for the buttonWait time period
+        digitalWrite(ledGREEN, HIGH); // Turn the GREEN LED on
+      }
+      if (digitalRead(button4) == button4state) { // Check if button4 is pressed
+        Serial.print("Button 4"); // Print a message to the Serial Monitor indicating which button is pressed
+        ble.sendCommandCheckOK("AT+BleHidControlKey=MEDIANEXT"); // Send a command to go to the next media
+        digitalWrite(ledGREEN, LOW); // Turn the GREEN LED off
+        delay(buttonWait); // Wait for the buttonWait time period
+        digitalWrite(ledGREEN, HIGH); // Turn the GREEN LED on
+      }
+      if (digitalRead(button5) == button5state) { // Check if button5 is pressed
+        Serial.println("Button 5"); // Print a message to the Serial Monitor indicating which button is pressed
+        ble.sendCommandCheckOK("AT+BleHidControlKey=MEDIAPREVIOUS"); // Send a command to go to the previous media
+        digitalWrite(ledGREEN, LOW); // Turn the GREEN LED off
+        delay(buttonWait); // Wait for the buttonWait time period
+        digitalWrite(ledGREEN, HIGH); // Turn the GREEN LED on
+      }
+      //TOGGLE SWITCH
+      if (digitalRead(button6) == button6state) { // Check if button6 is toggled
+        Serial.println("Button 6"); // Print a message to the Serial Monitor indicating which button is toggled
+        ble.sendCommandCheckOK("AT+BleHidControlKey=MEDIANEXT"); // Send a command to go to the next media
+        digitalWrite(ledGREEN, LOW); // Turn the GREEN LED off
+        delay(buttonWait); // Wait for the buttonWait time period
+        digitalWrite(ledGREEN, HIGH); // Turn the GREEN LED on
+      }
+      if (digitalRead(button7) == button7state) { // Check if button7 is toggled
+        Serial.println("Button 7"); // Print a message to the Serial Monitor indicating which button is toggled
+        ble.sendCommandCheckOK("AT+BleHidControlKey=MEDIAPREVIOUS"); // Send a command to go to the previous media
+        digitalWrite(ledGREEN, LOW); // Turn the GREEN LED off
+        delay(buttonWait); // Wait for the buttonWait time period
+        digitalWrite(ledGREEN, HIGH); // Turn the GREEN LED on
+      }
+    } //End softapp 2
+
+  if (softApp == 3) { // App 3 OsMand
+    digitalWrite(ledGREEN, HIGH); // Turn on the GREEN LED
+    digitalWrite(ledRED, LOW); // Turn off the RED LED
+    Serial.println("You are in softApp: OsMand"); // Indicate the current softApp in the serial monitor
+
+    // Handling for BUTTON 1
+    if (digitalRead(button1) == button1state) { 
+      Serial.println("Button1"); // Indicate that Button1 has been pressed
+      ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-52-00-00-00-00"); // Send Bluetooth command to simulate 'T' or 't' key press
+      ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00"); // Send Bluetooth command to release key
+      digitalWrite(ledGREEN, LOW); // Turn off the GREEN LED
+      delay(buttonWait); // Wait 
+      digitalWrite(ledGREEN, HIGH); // Turn on the GREEN LED
+    }
+    
+    // Similar handling for BUTTON 2
+    if (digitalRead(button2) == button2state) { 
+      Serial.println("Button2"); 
+      ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-51-00-00-00-00"); // Send Bluetooth command to simulate 'Q' or 'q' key press
+      ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00");
+      digitalWrite(ledGREEN, LOW);
+      delay(buttonWait);
+      digitalWrite(ledGREEN, HIGH);
+    }
+
+    // Similar handling for BUTTON 3
+    if (digitalRead(button3) == button3state) {
+      Serial.println("Button3"); 
+      ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-06-00-00-00-00"); // Send Bluetooth command to simulate 'D' or 'd' key press
+      ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00");
+      digitalWrite(ledGREEN, LOW);
+      delay(buttonWait);
+      digitalWrite(ledGREEN, HIGH);
+    }
+
+    // Similar handling for BUTTON 4
+    if (digitalRead(button4) == button4state) {
+      Serial.println("Button4");
+      ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-50-00-00-00-00"); // Send Bluetooth command to simulate 'P' or 'p' key press
+      ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00");
+      digitalWrite(ledGREEN, LOW);
+      delay(buttonWait);
+      digitalWrite(ledGREEN, HIGH);
+    }
+
+    // Similar handling for BUTTON 5
+    if (digitalRead(button5) == button5state) {
+      Serial.println("Button5");
+      ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-4F-00-00-00-00"); // Send Bluetooth command to simulate 'O' or 'o' key press
+      ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00");
+      digitalWrite(ledGREEN, LOW);
+      delay(buttonWait);
+      digitalWrite(ledGREEN, HIGH);
+    }
+
+      // Similar handling for BUTTON 6 (TOGGLE SWITCH)
+      if (digitalRead(button6) == button6state) {
+        Serial.println("Button6");
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-2E-00-00-00-00"); // Send Bluetooth command to simulate '.' key press
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00"); // Send Bluetooth command to release key
+        digitalWrite(ledGREEN, LOW); // Turn off the GREEN LED
+        delay(buttonWait); // Wait 
+        digitalWrite(ledGREEN, HIGH); // Turn on the GREEN LED
+      }
+      
+      // Similar handling for BUTTON 7 (TOGGLE SWITCH)
+      if (digitalRead(button7) == button7state) {
+        Serial.println("Button7");
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-2D-00-00-00-00"); // Send Bluetooth command to simulate '-' key press
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00"); // Send Bluetooth command to release key
+        digitalWrite(ledGREEN, LOW); // Turn off the GREEN LED
+        delay(buttonWait); // Wait 
+        digitalWrite(ledGREEN, HIGH); // Turn on the GREEN LED
+      }
+
+  } // End of SoftApp 3
+
+    if (softApp == 4) { // App 4: Piste
+  digitalWrite(ledGREEN, HIGH); // Turn on the GREEN LED
+  digitalWrite(ledRED, LOW); // Turn off the RED LED
+  Serial.println("You are in softApp: Piste"); // Print to the serial monitor
+
+      // Handling for PUSH BUTTONS
+      if (digitalRead(button1) == button1state) {
+        Serial.println("Button 1"); // Print to the serial monitor
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-1A-00-00-00-00"); // Send Bluetooth command to simulate 'w' or 'W' key press
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00"); // Send Bluetooth command to release key
+        digitalWrite(ledGREEN, LOW); // Turn off the GREEN LED
+        delay(buttonWait); // Wait
+        digitalWrite(ledGREEN, HIGH); // Turn on the GREEN LED
+      }
+      if (digitalRead(button2) == button2state) {
+        Serial.println("Button 2"); // Print to the serial monitor
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-1B-00-00-00-00"); // Send Bluetooth command to simulate 'x' or 'X' key press
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00"); // Send Bluetooth command to release key
+        digitalWrite(ledGREEN, LOW); // Turn off the GREEN LED
+        delay(buttonWait); // Wait
+        digitalWrite(ledGREEN, HIGH); // Turn on the GREEN LED
+      }
+      if (digitalRead(button3) == button3state) {
+        Serial.println("Button 3"); // Print to the serial monitor
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-04-00-00-00-00"); // Send Bluetooth command to simulate 'a' or 'A' key press
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00"); // Send Bluetooth command to release key
+        digitalWrite(ledGREEN, LOW); // Turn off the GREEN LED
+        delay(buttonWait); // Wait
+        digitalWrite(ledGREEN, HIGH); // Turn on the GREEN LED
+      }
+      if (digitalRead(button4) == button4state) {
+        Serial.println("Button 4"); // Print to the serial monitor
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-07-00-00-00-00"); // Send Bluetooth command to simulate 'd' or 'D' key press
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00"); // Send Bluetooth command to release key
+        digitalWrite(ledGREEN, LOW); // Turn off the GREEN LED
+        delay(buttonWait); // Wait
+        digitalWrite(ledGREEN, HIGH); // Turn on the GREEN LED
+      }
+      if (digitalRead(button5) == button5state) {
+        Serial.println("Button 5"); // Print to the serial monitor
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-14-00-00-00-00"); // Send Bluetooth command to simulate 'q' or 'Q' key press
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00"); // Send Bluetooth command to release key
+        digitalWrite(ledGREEN, LOW); // Turn off the GREEN LED
+        delay(buttonWait); // Wait
+        digitalWrite(ledGREEN, HIGH); // Turn on the GREEN LED
+      }
+      // Handling for TOGGLE SWITCH
+      if (digitalRead(button6) == button6state) {
+        Serial.println("Button 6"); // Print to the serial monitor
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-14-00-00-00-00"); // Send Bluetooth command to simulate 'q' or 'Q' key press
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00"); // Send Bluetooth command to release key
+        digitalWrite(ledGREEN, LOW); // Turn off the GREEN LED
+        delay(buttonWait); // Wait
+        digitalWrite(ledGREEN, HIGH); // Turn on the GREEN LED
+      }
+      if (digitalRead(button7) == button7state) {
+        Serial.println("Button 7"); // Print to the serial monitor
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00-07-00-00-00-00"); // Send Bluetooth command to simulate 'd' or 'D' key press
+        ble.sendCommandCheckOK("AT+BLEKEYBOARDCODE=00-00"); // Send Bluetooth command to release key
+        digitalWrite(ledGREEN, LOW); // Turn off the GREEN LED
+        delay(buttonWait); // Wait
+        digitalWrite(ledGREEN, HIGH); // Turn on the GREEN LED
+      } 
+
+    } //End of softApp 4
+
+  } //End of HIGH state button loop
+
+} //End of loop code
+
+void flashLedIndicator(int softApp) {
+  digitalWrite(ledRED, LOW);
+  delay (150);
+  for (int i = 1; i <= softApp; i++) {
+    digitalWrite(ledGREEN, HIGH); // Turn on the green LED
+    delay(150); // Pause for 150 milliseconds
+    digitalWrite(ledGREEN, LOW); // Turn off the green LED
+    delay(150); // Pause for 150 milliseconds
+  }
+  delay (150); // Pause for 150 milliseconds
+  digitalWrite(ledRED, HIGH); // Turn on the red LED
+}
