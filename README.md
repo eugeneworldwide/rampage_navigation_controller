@@ -7,7 +7,7 @@ https://www.rallyrampage.com or email at info@rallyrampage.com
 
 REVISIONS & RELEASES
 
-Version 1.7.3.7 Release date 2023/06/27
+Version 1.7.4 Release date 2023/06/27
 -Updated code with comments and AT command commented
 -moved led flashing indicator into seperate function to simplify code
 -next big release planned at v1.8 comming 2024

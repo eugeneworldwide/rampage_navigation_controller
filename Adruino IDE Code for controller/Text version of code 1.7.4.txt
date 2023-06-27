@@ -1,6 +1,6 @@
 //RALLY RAMPAGE BLUETOOTH BIKE HANDLEBAR NAVIGATION CONTROLLER
 // www.rallyrampage.com
-// Version: 1.7.3.7
+// Version: 1.7.4
 // Updated: 2023-06-26
 
 // This version allows for the selection of various apps by putting the unit in MODE
